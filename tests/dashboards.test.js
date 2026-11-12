@@ -5,7 +5,7 @@ import {
   buildDashboard,
   dashboardName,
   selectGraphs,
-} from '../scripts/lib/dashboards.mjs';
+} from '../src/core/dashboards.js';
 
 function graph(graphid, name) {
   return { graphid, name };

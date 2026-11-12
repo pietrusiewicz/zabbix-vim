@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { buildDashboard } from './lib/dashboards.mjs';
+import { createZabbixClient } from '../src/api/zabbix.js';
+import { provisionDashboards } from '../src/core/provision.js';
 
 const USAGE = `Usage: node scripts/provision-dashboards.mjs [options]
 
@@ -15,6 +16,7 @@ Options:
   --name <template>        dashboard name template, {group} is replaced (default "Auto: {group}")
   --graphs-per-host <n>    graphs taken from each host (default 2)
   --max-graphs <n>         graph widgets per dashboard (default 8)
+  --include-empty          also create dashboards for groups without hosts
   --apply                  write changes (without it only prints the payload)
   -h, --help               show this help
 `;
@@ -29,6 +31,7 @@ function parseArgs(argv) {
     nameTemplate: 'Auto: {group}',
     graphsPerHost: 2,
     maxGraphs: 8,
+    includeEmpty: false,
     apply: false,
   };
 
@@ -65,6 +68,9 @@ function parseArgs(argv) {
       case '--max-graphs':
         options.maxGraphs = Number(next());
         break;
+      case '--include-empty':
+        options.includeEmpty = true;
+        break;
       case '--apply':
         options.apply = true;
         break;
@@ -79,80 +85,6 @@ function parseArgs(argv) {
   return options;
 }
 
-function createClient({ url, token, user, password }) {
-  const endpoint = new URL('api_jsonrpc.php', url).href;
-  let requestId = 0;
-  let session;
-
-  async function rpc(method, params = {}) {
-    const headers = { 'content-type': 'application/json-rpc' };
-    const body = { jsonrpc: '2.0', method, params, id: (requestId += 1) };
-    if (token) headers.authorization = `Bearer ${token}`;
-    else if (session) body.auth = session;
-
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
-    const payload = await response.json();
-    if (payload.error) {
-      throw new Error(`${method}: ${payload.error.message} ${payload.error.data || ''}`.trim());
-    }
-    return payload.result;
-  }
-
-  async function login() {
-    if (token) return;
-    if (!password) throw new Error('provide --token or --password');
-    session = await rpc('user.login', { username: user, password });
-  }
-
-  return { rpc, login };
-}
-
-async function collectGroups(client, wanted) {
-  const groups = await client.rpc('hostgroup.get', {
-    output: ['groupid', 'name'],
-    sortfield: 'name',
-  });
-  if (wanted.length === 0) return groups;
-  const selected = groups.filter(
-    (group) => wanted.includes(group.groupid) || wanted.includes(group.name),
-  );
-  const missing = wanted.filter(
-    (wantedName) =>
-      !groups.some((group) => group.groupid === wantedName || group.name === wantedName),
-  );
-  if (missing.length > 0) throw new Error(`unknown host group(s): ${missing.join(', ')}`);
-  return selected;
-}
-
-async function collectHosts(client, groupid) {
-  return client.rpc('host.get', {
-    output: ['hostid', 'name'],
-    groupids: [groupid],
-    sortfield: 'name',
-  });
-}
-
-async function collectGraphs(client, host) {
-  const graphs = await client.rpc('graph.get', {
-    output: ['graphid', 'name'],
-    hostids: [host.hostid],
-    sortfield: 'name',
-  });
-  return { hostid: host.hostid, hostName: host.name, graphs };
-}
-
-async function findDashboard(client, name) {
-  const dashboards = await client.rpc('dashboard.get', {
-    output: ['dashboardid', 'name'],
-    filter: { name },
-  });
-  return dashboards[0] || null;
-}
-
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
@@ -161,46 +93,30 @@ async function main() {
   }
   if (!options.url) throw new Error('set --url or ZBX_URL');
 
-  const client = createClient(options);
-  await client.login();
-
-  const groups = await collectGroups(client, options.groups);
-  const report = [];
-
-  for (const group of groups) {
-    const hosts = await collectHosts(client, group.groupid);
-    const graphs = await Promise.all(hosts.map((host) => collectGraphs(client, host)));
-    const dashboard = buildDashboard({
-      group,
-      graphs,
-      nameTemplate: options.nameTemplate,
-      options: { perHost: options.graphsPerHost, maxTotal: options.maxGraphs },
-    });
-
-    const existing = await findDashboard(client, dashboard.name);
-    const widgetCount = dashboard.pages[0].widgets.length;
-
-    if (!options.apply) {
-      report.push({ group: group.name, hostCount: hosts.length, widgetCount, action: 'would create', name: dashboard.name });
-      process.stdout.write(`${JSON.stringify(dashboard, null, 2)}\n`);
-      continue;
-    }
-
-    if (existing) {
-      await client.rpc('dashboard.update', { dashboardid: existing.dashboardid, ...dashboard });
-      report.push({ group: group.name, hostCount: hosts.length, widgetCount, action: 'updated', name: dashboard.name });
-    } else {
-      const created = await client.rpc('dashboard.create', dashboard);
-      const dashboardid = created.dashboardids[0];
-      report.push({ group: group.name, hostCount: hosts.length, widgetCount, action: 'created', name: dashboard.name, dashboardid });
-    }
+  const client = createZabbixClient(options);
+  if (!options.token) {
+    if (!options.password) throw new Error('provide --token or --password');
+    await client.login(options.user, options.password);
   }
+
+  const report = await provisionDashboards(client, {
+    groups: options.groups,
+    nameTemplate: options.nameTemplate,
+    perHost: options.graphsPerHost,
+    maxTotal: options.maxGraphs,
+    skipEmpty: !options.includeEmpty,
+    apply: options.apply,
+    onProgress: (entry) => {
+      if (!options.apply) process.stdout.write(`${JSON.stringify(entry.payload, null, 2)}\n`);
+    },
+  });
 
   process.stdout.write('\n');
   for (const row of report) {
     const id = row.dashboardid ? ` (id ${row.dashboardid})` : '';
+    const name = row.name ? ` ${row.name}${id}` : '';
     process.stdout.write(
-      `${row.action.padEnd(12)} ${row.name}${id} — ${row.hostCount} host(s), ${row.widgetCount} widget(s)\n`,
+      `${row.action.padEnd(12)}${name} — ${row.hostCount} host(s), ${row.widgetCount} widget(s)\n`,
     );
   }
   if (!options.apply) process.stdout.write('\nDry run. Pass --apply to write changes.\n');

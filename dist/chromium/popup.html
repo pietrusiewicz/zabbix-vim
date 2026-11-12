@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Zabbix Vim Keys</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <h1>Zabbix Vim Keys</h1>
+    <p class="hint">Auto dashboards</p>
+  </header>
+
+  <form id="form">
+    <label>
+      Zabbix URL
+      <input id="url" type="url" placeholder="https://zabbix.example" autocomplete="off" spellcheck="false">
+    </label>
+
+    <label>
+      API token
+      <input id="token" type="password" placeholder="preferred: token with dashboard write access" autocomplete="off">
+    </label>
+
+    <div class="split">
+      <label>
+        User <span class="muted">(when no token)</span>
+        <input id="user" type="text" placeholder="Admin" autocomplete="off" spellcheck="false">
+      </label>
+      <label>
+        Password
+        <input id="password" type="password" autocomplete="off">
+      </label>
+    </div>
+
+    <label>
+      Host groups <span class="muted">(comma separated, empty = all)</span>
+      <input id="groups" type="text" placeholder="Linux servers, Databases" autocomplete="off">
+    </label>
+
+    <label class="row">
+      <input id="apply" type="checkbox">
+      Apply changes <span class="muted">(unchecked = dry run)</span>
+    </label>
+
+    <button id="generate" type="button">Generate dashboards</button>
+  </form>
+
+  <pre id="status" class="status" aria-live="polite"></pre>
+
+  <script src="popup.js"></script>
+</body>
+</html>
