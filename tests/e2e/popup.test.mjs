@@ -56,3 +56,55 @@ test('popup generates dashboards in dry-run mode', { skip }, async () => {
     rmSync(profile, { recursive: true, force: true });
   }
 });
+
+test('popup builds a custom dashboard in dry-run mode', { skip }, async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'zbxvim-popup-custom-'));
+  const context = await chromium.launchPersistentContext(profile, {
+    channel: 'chromium',
+    headless: true,
+    args: [
+      `--disable-extensions-except=${EXTENSION}`,
+      `--load-extension=${EXTENSION}`,
+      '--no-sandbox',
+    ],
+  });
+
+  try {
+    const page = await context.newPage();
+    await page.goto(`chrome-extension://${extensionId(EXTENSION)}/popup.html`);
+
+    await page.fill('#url', ZBX_URL);
+    await page.fill('#user', ZBX_USER);
+    await page.fill('#password', ZBX_PASSWORD);
+
+    await page.click('#tab-custom');
+    await page.click('#load-groups');
+    await page.waitForFunction(
+      () => document.getElementById('custom-groups').options.length > 0,
+      null,
+      { timeout: 60_000 },
+    );
+
+    const option = page.locator('#custom-groups option').first();
+    await option.waitFor();
+    const groupid = await option.getAttribute('value');
+    await page.selectOption('#custom-groups', [groupid]);
+
+    await page.fill('#custom-name', 'Ops overview');
+    await page.click('#custom-generate');
+
+    await page.waitForFunction(
+      () => /would create|error/i.test(document.getElementById('status').textContent),
+      null,
+      { timeout: 60_000 },
+    );
+
+    const status = await page.locator('#status').textContent();
+    assert.doesNotMatch(status, /error/i);
+    assert.match(status, /Ops overview/);
+    assert.match(status, /Dry run/);
+  } finally {
+    await context.close();
+    rmSync(profile, { recursive: true, force: true });
+  }
+});

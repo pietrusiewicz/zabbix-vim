@@ -73,53 +73,104 @@ export function selectGraphs(hostGraphs, options = {}) {
   return picked;
 }
 
-export function buildDashboard({ group, graphs = [], nameTemplate = 'Auto: {group}', options = {} }) {
-  const widgets = [];
+export const DEFAULT_WIDGETS = Object.freeze({
+  problems: true,
+  severity: true,
+  availability: true,
+  graphs: true,
+});
 
-  widgets.push(
-    widget('problems', 'Problems', 0, 0, GRID_WIDTH, PROBLEMS_HEIGHT, [
-      [0, 'groupids', group.groupid],
-      [0, 'show', '1'],
-      [0, 'show_tags', '3'],
-    ]),
-  );
+function groupFields(groupids) {
+  // The dashboard API has no array type for widget fields; a multiselect is
+  // encoded as repeated fields with the same name.
+  return groupids.map((groupid) => [0, 'groupids', groupid]);
+}
 
-  const summaryY = PROBLEMS_HEIGHT;
-  widgets.push(
-    widget('problemsbysv', 'Problems by severity', 0, summaryY, GRAPH_WIDTH, SUMMARY_HEIGHT, [
-      [0, 'groupids', group.groupid],
-    ]),
-  );
-  widgets.push(
-    widget('hostavail', 'Host availability', GRAPH_WIDTH, summaryY, GRAPH_WIDTH, SUMMARY_HEIGHT, [
-      [0, 'groupids', group.groupid],
-    ]),
-  );
+function layoutWidgets({ groupids, graphs = [], widgets = {}, options = {} }) {
+  const include = { ...DEFAULT_WIDGETS, ...widgets };
+  const list = [];
+  let y = 0;
 
-  const firstGraphY = summaryY + SUMMARY_HEIGHT;
-  selectGraphs(graphs, options).forEach((graph, index) => {
-    const column = index % 2;
-    const row = Math.floor(index / 2);
-    widgets.push(
-      widget(
-        'graph',
-        `${graph.name} — ${graph.hostName}`,
-        column * GRAPH_WIDTH,
-        firstGraphY + row * GRAPH_HEIGHT,
-        GRAPH_WIDTH,
-        GRAPH_HEIGHT,
-        [
-          [0, 'source', '0'],
-          [0, 'graphid', graph.graphid],
-        ],
-      ),
+  if (include.problems) {
+    list.push(
+      widget('problems', 'Problems', 0, y, GRID_WIDTH, PROBLEMS_HEIGHT, [
+        ...groupFields(groupids),
+        [0, 'show', '1'],
+        [0, 'show_tags', '3'],
+      ]),
     );
-  });
+    y += PROBLEMS_HEIGHT;
+  }
 
+  if (include.severity || include.availability) {
+    const half = include.severity && include.availability;
+    if (include.severity) {
+      list.push(
+        widget('problemsbysv', 'Problems by severity', 0, y, half ? GRAPH_WIDTH : GRID_WIDTH, SUMMARY_HEIGHT, groupFields(groupids)),
+      );
+    }
+    if (include.availability) {
+      list.push(
+        widget(
+          'hostavail',
+          'Host availability',
+          half ? GRAPH_WIDTH : 0,
+          y,
+          half ? GRAPH_WIDTH : GRID_WIDTH,
+          SUMMARY_HEIGHT,
+          groupFields(groupids),
+        ),
+      );
+    }
+    y += SUMMARY_HEIGHT;
+  }
+
+  if (include.graphs) {
+    selectGraphs(graphs, options).forEach((graph, index) => {
+      const column = index % 2;
+      const row = Math.floor(index / 2);
+      list.push(
+        widget(
+          'graph',
+          `${graph.name} — ${graph.hostName}`,
+          column * GRAPH_WIDTH,
+          y + row * GRAPH_HEIGHT,
+          GRAPH_WIDTH,
+          GRAPH_HEIGHT,
+          [
+            [0, 'source', '0'],
+            [0, 'graphid', graph.graphid],
+          ],
+        ),
+      );
+    });
+  }
+
+  return list;
+}
+
+export function buildDashboard({ group, graphs = [], nameTemplate = 'Auto: {group}', options = {} }) {
   return {
     name: dashboardName(nameTemplate, group.name),
     display_period: 30,
     auto_start: 1,
-    pages: [{ widgets }],
+    pages: [{ widgets: layoutWidgets({ groupids: [group.groupid], graphs, options }) }],
+  };
+}
+
+export function buildCustomDashboard({
+  name,
+  groupids = [],
+  graphs = [],
+  widgets = {},
+  options = {},
+}) {
+  if (!name) throw new Error('dashboard name is required');
+  if (groupids.length === 0) throw new Error('at least one host group is required');
+  return {
+    name,
+    display_period: 30,
+    auto_start: 1,
+    pages: [{ widgets: layoutWidgets({ groupids, graphs, widgets, options }) }],
   };
 }

@@ -123,54 +123,105 @@ function selectGraphs(hostGraphs, options = {}) {
   return picked;
 }
 
-function buildDashboard({ group, graphs = [], nameTemplate = 'Auto: {group}', options = {} }) {
-  const widgets = [];
+const DEFAULT_WIDGETS = Object.freeze({
+  problems: true,
+  severity: true,
+  availability: true,
+  graphs: true,
+});
 
-  widgets.push(
-    widget('problems', 'Problems', 0, 0, GRID_WIDTH, PROBLEMS_HEIGHT, [
-      [0, 'groupids', group.groupid],
-      [0, 'show', '1'],
-      [0, 'show_tags', '3'],
-    ]),
-  );
+function groupFields(groupids) {
+  // The dashboard API has no array type for widget fields; a multiselect is
+  // encoded as repeated fields with the same name.
+  return groupids.map((groupid) => [0, 'groupids', groupid]);
+}
 
-  const summaryY = PROBLEMS_HEIGHT;
-  widgets.push(
-    widget('problemsbysv', 'Problems by severity', 0, summaryY, GRAPH_WIDTH, SUMMARY_HEIGHT, [
-      [0, 'groupids', group.groupid],
-    ]),
-  );
-  widgets.push(
-    widget('hostavail', 'Host availability', GRAPH_WIDTH, summaryY, GRAPH_WIDTH, SUMMARY_HEIGHT, [
-      [0, 'groupids', group.groupid],
-    ]),
-  );
+function layoutWidgets({ groupids, graphs = [], widgets = {}, options = {} }) {
+  const include = { ...DEFAULT_WIDGETS, ...widgets };
+  const list = [];
+  let y = 0;
 
-  const firstGraphY = summaryY + SUMMARY_HEIGHT;
-  selectGraphs(graphs, options).forEach((graph, index) => {
-    const column = index % 2;
-    const row = Math.floor(index / 2);
-    widgets.push(
-      widget(
-        'graph',
-        `${graph.name} — ${graph.hostName}`,
-        column * GRAPH_WIDTH,
-        firstGraphY + row * GRAPH_HEIGHT,
-        GRAPH_WIDTH,
-        GRAPH_HEIGHT,
-        [
-          [0, 'source', '0'],
-          [0, 'graphid', graph.graphid],
-        ],
-      ),
+  if (include.problems) {
+    list.push(
+      widget('problems', 'Problems', 0, y, GRID_WIDTH, PROBLEMS_HEIGHT, [
+        ...groupFields(groupids),
+        [0, 'show', '1'],
+        [0, 'show_tags', '3'],
+      ]),
     );
-  });
+    y += PROBLEMS_HEIGHT;
+  }
 
+  if (include.severity || include.availability) {
+    const half = include.severity && include.availability;
+    if (include.severity) {
+      list.push(
+        widget('problemsbysv', 'Problems by severity', 0, y, half ? GRAPH_WIDTH : GRID_WIDTH, SUMMARY_HEIGHT, groupFields(groupids)),
+      );
+    }
+    if (include.availability) {
+      list.push(
+        widget(
+          'hostavail',
+          'Host availability',
+          half ? GRAPH_WIDTH : 0,
+          y,
+          half ? GRAPH_WIDTH : GRID_WIDTH,
+          SUMMARY_HEIGHT,
+          groupFields(groupids),
+        ),
+      );
+    }
+    y += SUMMARY_HEIGHT;
+  }
+
+  if (include.graphs) {
+    selectGraphs(graphs, options).forEach((graph, index) => {
+      const column = index % 2;
+      const row = Math.floor(index / 2);
+      list.push(
+        widget(
+          'graph',
+          `${graph.name} — ${graph.hostName}`,
+          column * GRAPH_WIDTH,
+          y + row * GRAPH_HEIGHT,
+          GRAPH_WIDTH,
+          GRAPH_HEIGHT,
+          [
+            [0, 'source', '0'],
+            [0, 'graphid', graph.graphid],
+          ],
+        ),
+      );
+    });
+  }
+
+  return list;
+}
+
+function buildDashboard({ group, graphs = [], nameTemplate = 'Auto: {group}', options = {} }) {
   return {
     name: dashboardName(nameTemplate, group.name),
     display_period: 30,
     auto_start: 1,
-    pages: [{ widgets }],
+    pages: [{ widgets: layoutWidgets({ groupids: [group.groupid], graphs, options }) }],
+  };
+}
+
+function buildCustomDashboard({
+  name,
+  groupids = [],
+  graphs = [],
+  widgets = {},
+  options = {},
+}) {
+  if (!name) throw new Error('dashboard name is required');
+  if (groupids.length === 0) throw new Error('at least one host group is required');
+  return {
+    name,
+    display_period: 30,
+    auto_start: 1,
+    pages: [{ widgets: layoutWidgets({ groupids, graphs, widgets, options }) }],
   };
 }
 
@@ -193,13 +244,36 @@ async function collectGroups(client, wanted = []) {
   return selected;
 }
 
-async function collectGraphs(client, host) {
-  const graphs = await client.call('graph.get', {
-    output: ['graphid', 'name'],
-    hostids: [host.hostid],
-    sortfield: 'name',
-  });
-  return { hostid: host.hostid, hostName: host.name, graphs };
+async function loadHostGraphs(client, hosts) {
+  const graphs = [];
+  for (const host of hosts) {
+    const hostGraphs = await client.call('graph.get', {
+      output: ['graphid', 'name'],
+      hostids: [host.hostid],
+      sortfield: 'name',
+    });
+    graphs.push({ hostid: host.hostid, hostName: host.name, graphs: hostGraphs });
+  }
+  return graphs;
+}
+
+async function upsertDashboard(client, dashboard, apply) {
+  if (!apply) return { action: 'would create', payload: dashboard };
+
+  const existing = (
+    await client.call('dashboard.get', {
+      output: ['dashboardid'],
+      filter: { name: dashboard.name },
+    })
+  )[0];
+
+  if (existing) {
+    await client.call('dashboard.update', { dashboardid: existing.dashboardid, ...dashboard });
+    return { action: 'updated', dashboardid: existing.dashboardid };
+  }
+
+  const created = await client.call('dashboard.create', dashboard);
+  return { action: 'created', dashboardid: created.dashboardids[0] };
 }
 
 async function provisionDashboards(client, options = {}) {
@@ -222,6 +296,7 @@ async function provisionDashboards(client, options = {}) {
       groupids: [group.groupid],
       sortfield: 'name',
     });
+
     if (hosts.length === 0 && skipEmpty) {
       const skipped = { group: group.name, name: '', hostCount: 0, widgetCount: 0, action: 'skipped' };
       onProgress(skipped);
@@ -229,48 +304,75 @@ async function provisionDashboards(client, options = {}) {
       continue;
     }
 
-    const graphs = [];
-    for (const host of hosts) graphs.push(await collectGraphs(client, host));
-
+    const graphs = await loadHostGraphs(client, hosts);
     const dashboard = buildDashboard({ group, graphs, nameTemplate, options: { perHost, maxTotal } });
-    const existing = (
-      await client.call('dashboard.get', {
-        output: ['dashboardid'],
-        filter: { name: dashboard.name },
-      })
-    )[0];
+    const result = await upsertDashboard(client, dashboard, apply);
 
-    const base = {
+    const entry = {
       group: group.name,
       name: dashboard.name,
       hostCount: hosts.length,
       widgetCount: dashboard.pages[0].widgets.length,
+      ...result,
     };
-
-    if (!apply) {
-      onProgress({ ...base, action: 'would create' });
-      report.push({ ...base, action: 'would create', payload: dashboard });
-      continue;
-    }
-
-    if (existing) {
-      await client.call('dashboard.update', { dashboardid: existing.dashboardid, ...dashboard });
-      onProgress({ ...base, action: 'updated' });
-      report.push({ ...base, action: 'updated', dashboardid: existing.dashboardid });
-    } else {
-      const created = await client.call('dashboard.create', dashboard);
-      const dashboardid = created.dashboardids[0];
-      onProgress({ ...base, action: 'created' });
-      report.push({ ...base, action: 'created', dashboardid });
-    }
+    onProgress(entry);
+    report.push(entry);
   }
 
   return report;
 }
 
+async function provisionCustomDashboard(client, options = {}) {
+  const {
+    name,
+    groupids = [],
+    widgets = {},
+    perHost = 2,
+    maxTotal = 8,
+    apply = false,
+    onProgress = () => {},
+  } = options;
+
+  const hosts = await client.call('host.get', {
+    output: ['hostid', 'name'],
+    groupids,
+    sortfield: 'name',
+  });
+  const graphs = await loadHostGraphs(client, hosts);
+  const dashboard = buildCustomDashboard({
+    name,
+    groupids,
+    graphs,
+    widgets,
+    options: { perHost, maxTotal },
+  });
+  const result = await upsertDashboard(client, dashboard, apply);
+
+  const entry = {
+    group: '(custom)',
+    name,
+    hostCount: hosts.length,
+    widgetCount: dashboard.pages[0].widgets.length,
+    ...result,
+  };
+  onProgress(entry);
+  return [entry];
+}
+
 // src/popup/main.js
 const ext = globalThis.browser ?? globalThis.chrome;
-const SETTING_KEYS = ['url', 'token', 'user', 'groups', 'apply'];
+const SETTING_KEYS = [
+  'url',
+  'token',
+  'user',
+  'groups',
+  'apply',
+  'customName',
+  'customGroups',
+  'widgets',
+  'graphsPerHost',
+  'maxGraphs',
+];
 
 function storageGet(keys) {
   const area = ext.storage.local;
@@ -287,75 +389,153 @@ function storageSet(values) {
 }
 
 const $ = (id) => document.getElementById(id);
-
 const statusEl = $('status');
-const button = $('generate');
 
 function setStatus(lines, isError = false) {
   statusEl.textContent = lines.join('\n');
   statusEl.classList.toggle('error', isError);
 }
 
-function readForm() {
+function readCredentials() {
   return {
     url: $('url').value.trim(),
     token: $('token').value.trim(),
     user: $('user').value.trim() || 'Admin',
     password: $('password').value,
-    groups: $('groups')
-      .value.split(',')
-      .map((group) => group.trim())
-      .filter(Boolean),
+  };
+}
+
+function readWidgets() {
+  return {
+    problems: $('w-problems').checked,
+    severity: $('w-severity').checked,
+    availability: $('w-availability').checked,
+    graphs: $('w-graphs').checked,
+  };
+}
+
+async function connect() {
+  const credentials = readCredentials();
+  if (!credentials.url) throw new Error('Zabbix URL is required.');
+  if (!credentials.token && !credentials.password) {
+    throw new Error('Provide an API token, or a user and password.');
+  }
+  const client = createZabbixClient({ url: credentials.url, token: credentials.token });
+  if (!credentials.token) await client.login(credentials.user, credentials.password);
+  return client;
+}
+
+function progressLine(entry) {
+  if (entry.action === 'skipped') return `skipped      ${entry.group} — no hosts`;
+  return `${entry.action.padEnd(12)} ${entry.name} — ${entry.hostCount} host(s), ${entry.widgetCount} widget(s)`;
+}
+
+async function saveSettings() {
+  const credentials = readCredentials();
+  await storageSet({
+    url: credentials.url,
+    token: credentials.token,
+    user: credentials.user,
+    groups: $('groups').value,
     apply: $('apply').checked,
+    customName: $('custom-name').value,
+    customGroups: [...$('custom-groups').selectedOptions].map((option) => option.value),
+    widgets: readWidgets(),
+    graphsPerHost: $('graphs-per-host').value,
+    maxGraphs: $('max-graphs').value,
+  });
+}
+
+function runWithStatus(action) {
+  return async (event) => {
+    const button = event?.currentTarget;
+    if (button) button.disabled = true;
+    const lines = [];
+    const push = (line) => {
+      lines.push(line);
+      setStatus(lines);
+    };
+    setStatus([]);
+    try {
+      await action(push);
+      if (lines.length === 0) push('Nothing to do.');
+      if (!$('apply').checked) push('Dry run — tick "Apply changes" to write.');
+    } catch (error) {
+      push(`error: ${error.message}`);
+      statusEl.classList.add('error');
+    } finally {
+      if (button) button.disabled = false;
+    }
   };
 }
 
-async function generate() {
-  const settings = readForm();
-  if (!settings.url) return setStatus(['Zabbix URL is required.'], true);
-  if (!settings.token && !settings.password) {
-    return setStatus(['Provide an API token, or a user and password.'], true);
-  }
+async function generateAuto(push) {
+  const groups = $('groups')
+    .value.split(',')
+    .map((group) => group.trim())
+    .filter(Boolean);
 
-  button.disabled = true;
-  const lines = [];
-  const push = (line) => {
-    lines.push(line);
-    setStatus(lines);
-  };
-
-  try {
-    await storageSet({
-      url: settings.url,
-      token: settings.token,
-      user: settings.user,
-      groups: settings.groups.join(', '),
-      apply: settings.apply,
-    });
-    const client = createZabbixClient({ url: settings.url, token: settings.token });
-    if (!settings.token) await client.login(settings.user, settings.password);
-    const report = await provisionDashboards(client, {
-      groups: settings.groups,
-      apply: settings.apply,
-      onProgress: (entry) => {
-        if (entry.action === 'skipped') {
-          push(`skipped      ${entry.group} — no hosts`);
-          return;
-        }
-        push(
-          `${entry.action.padEnd(12)} ${entry.name} — ${entry.hostCount} host(s), ${entry.widgetCount} widget(s)`,
-        );
-      },
-    });
-    if (report.length === 0) push('No host groups matched.');
-    if (!settings.apply) push('Dry run — tick "Apply changes" to write.');
-  } catch (error) {
-    push(`error: ${error.message}`);
-    statusEl.classList.add('error');
-  } finally {
-    button.disabled = false;
-  }
+  await saveSettings();
+  const client = await connect();
+  const report = await provisionDashboards(client, {
+    groups,
+    apply: $('apply').checked,
+    onProgress: (entry) => push(progressLine(entry)),
+  });
+  if (report.length === 0) push('No host groups matched.');
 }
+
+async function loadGroups(push) {
+  const client = await connect();
+  const groups = await client.call('hostgroup.get', {
+    output: ['groupid', 'name'],
+    sortfield: 'name',
+  });
+  const select = $('custom-groups');
+  const selected = new Set([...select.selectedOptions].map((option) => option.value));
+  select.replaceChildren();
+  for (const group of groups) {
+    const option = document.createElement('option');
+    option.value = group.groupid;
+    option.textContent = group.name;
+    option.selected = selected.has(group.groupid);
+    select.appendChild(option);
+  }
+  push(`loaded ${groups.length} host group(s)`);
+}
+
+async function generateCustom(push) {
+  const name = $('custom-name').value.trim();
+  const groupids = [...$('custom-groups').selectedOptions].map((option) => option.value);
+  if (!name) throw new Error('dashboard name is required.');
+  if (groupids.length === 0) throw new Error('select at least one host group.');
+
+  await saveSettings();
+  const client = await connect();
+  await provisionCustomDashboard(client, {
+    name,
+    groupids,
+    widgets: readWidgets(),
+    perHost: Number($('graphs-per-host').value) || 0,
+    maxTotal: Number($('max-graphs').value) || 0,
+    apply: $('apply').checked,
+    onProgress: (entry) => push(progressLine(entry)),
+  });
+}
+
+function selectTab(which) {
+  $('tab-auto').classList.toggle('is-active', which === 'auto');
+  $('tab-custom').classList.toggle('is-active', which === 'custom');
+  $('panel-auto').hidden = which !== 'auto';
+  $('panel-custom').hidden = which !== 'custom';
+}
+
+$('tab-auto').addEventListener('click', () => selectTab('auto'));
+$('tab-custom').addEventListener('click', () => selectTab('custom'));
+
+$('generate').addEventListener('click', runWithStatus(generateAuto));
+$('custom-generate').addEventListener('click', runWithStatus(generateCustom));
+$('load-groups').addEventListener('click', runWithStatus(loadGroups));
 
 async function restore() {
   const saved = await storageGet(SETTING_KEYS);
@@ -364,9 +544,19 @@ async function restore() {
   if (saved.user) $('user').value = saved.user;
   if (saved.groups) $('groups').value = saved.groups;
   $('apply').checked = saved.apply === true;
+  if (saved.customName) $('custom-name').value = saved.customName;
+  if (saved.graphsPerHost) $('graphs-per-host').value = saved.graphsPerHost;
+  if (saved.maxGraphs) $('max-graphs').value = saved.maxGraphs;
+  if (saved.widgets) {
+    $('w-problems').checked = saved.widgets.problems !== false;
+    $('w-severity').checked = saved.widgets.severity !== false;
+    $('w-availability').checked = saved.widgets.availability !== false;
+    $('w-graphs').checked = saved.widgets.graphs !== false;
+  }
+  if (Array.isArray(saved.customGroups) && saved.customGroups.length > 0) {
+    selectTab('custom');
+  }
 }
-
-button.addEventListener('click', generate);
 
 restore().catch(() => {});
 

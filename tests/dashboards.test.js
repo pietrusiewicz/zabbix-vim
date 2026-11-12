@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildCustomDashboard,
   buildDashboard,
   dashboardName,
   selectGraphs,
@@ -115,4 +116,40 @@ test('wraps graph widgets after two columns', () => {
     [36, 9],
     [0, 14],
   ]);
+});
+
+test('custom dashboard repeats the group field for every selected group', () => {
+  const dashboard = buildCustomDashboard({
+    name: 'Ops overview',
+    groupids: ['2', '4'],
+    widgets: { graphs: false },
+  });
+  const fields = dashboard.pages[0].widgets[0].fields.filter((field) => field.name === 'groupids');
+  assert.deepEqual(fields.map((field) => field.value), ['2', '4']);
+});
+
+test('custom dashboard can drop widgets', () => {
+  const dashboard = buildCustomDashboard({
+    name: 'Empty',
+    groupids: ['2'],
+    widgets: { problems: false, severity: false, availability: false, graphs: false },
+  });
+  assert.equal(dashboard.pages[0].widgets.length, 0);
+});
+
+test('a single summary widget takes the full width', () => {
+  const dashboard = buildCustomDashboard({
+    name: 'Severity only',
+    groupids: ['2'],
+    widgets: { problems: false, severity: true, availability: false, graphs: false },
+  });
+  const [widget] = dashboard.pages[0].widgets;
+  assert.equal(widget.type, 'problemsbysv');
+  assert.equal(widget.x, 0);
+  assert.equal(widget.width, 72);
+});
+
+test('custom dashboard validates its input', () => {
+  assert.throws(() => buildCustomDashboard({ name: '', groupids: ['2'] }), /name is required/);
+  assert.throws(() => buildCustomDashboard({ name: 'X', groupids: [] }), /at least one host group/);
 });

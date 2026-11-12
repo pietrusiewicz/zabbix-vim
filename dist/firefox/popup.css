@@ -109,3 +109,81 @@ button:disabled {
   flex: 1;
   min-width: 0;
 }
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin: 12px 0;
+}
+
+.tab {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid #3a3a3c;
+  border-radius: 4px;
+  background: #2c2c2e;
+  color: #b4b4b8;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tab.is-active {
+  border-color: #0a84ff;
+  background: #0a84ff;
+  color: #fff;
+}
+
+select {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 4px;
+  border: 1px solid #3a3a3c;
+  border-radius: 4px;
+  background: #2c2c2e;
+  color: #fff;
+  font: inherit;
+}
+
+select:focus {
+  outline: none;
+  border-color: #0a84ff;
+}
+
+fieldset {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid #3a3a3c;
+  border-radius: 4px;
+}
+
+legend {
+  padding: 0 4px;
+  color: #b4b4b8;
+  font-size: 11px;
+}
+
+button.secondary {
+  margin: 6px 0 12px;
+  border: 1px solid #3a3a3c;
+  background: #2c2c2e;
+  color: #e8e8ea;
+  font-weight: 500;
+}
+
+.apply {
+  margin-top: 14px;
+}
+
+input[type='number'] {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 1px solid #3a3a3c;
+  border-radius: 4px;
+  background: #2c2c2e;
+  color: #fff;
+  font: inherit;
+}

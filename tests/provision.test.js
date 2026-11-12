@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { provisionDashboards } from '../src/core/provision.js';
+import { provisionCustomDashboard, provisionDashboards } from '../src/core/provision.js';
 
 function fakeClient(routes) {
   const calls = [];
@@ -104,5 +104,53 @@ test('rejects unknown group names', async () => {
   await assert.rejects(
     () => provisionDashboards(client, { groups: ['Nope'], apply: true }),
     /unknown host group\(s\): Nope/,
+  );
+});
+
+test('provisions a custom dashboard for several groups at once', async () => {
+  const client = fakeClient({
+    'host.get': () => [
+      { hostid: '100', name: 'web-01' },
+      { hostid: '101', name: 'db-01' },
+    ],
+    'graph.get': () => [{ graphid: '55', name: 'CPU utilization' }],
+    'dashboard.get': () => [],
+    'dashboard.create': () => ({ dashboardids: ['500'] }),
+  });
+
+  const [entry] = await provisionCustomDashboard(client, {
+    name: 'Ops overview',
+    groupids: ['2', '4'],
+    apply: true,
+  });
+
+  assert.equal(entry.action, 'created');
+  assert.equal(entry.hostCount, 2);
+  const create = client.calls.find((call) => call.method === 'dashboard.create');
+  assert.equal(create.params.name, 'Ops overview');
+  const groupFields = create.params.pages[0].widgets[0].fields.filter(
+    (field) => field.name === 'groupids',
+  );
+  assert.deepEqual(groupFields.map((field) => field.value), ['2', '4']);
+});
+
+test('custom dashboard dry run does not write', async () => {
+  const client = fakeClient({
+    'host.get': () => [{ hostid: '100', name: 'web-01' }],
+    'graph.get': () => [],
+    'dashboard.get': () => [],
+  });
+
+  const [entry] = await provisionCustomDashboard(client, {
+    name: 'Ops overview',
+    groupids: ['2'],
+    apply: false,
+  });
+
+  assert.equal(entry.action, 'would create');
+  assert.equal(entry.payload.name, 'Ops overview');
+  assert.deepEqual(
+    client.calls.filter((call) => ['dashboard.create', 'dashboard.update'].includes(call.method)),
+    [],
   );
 });

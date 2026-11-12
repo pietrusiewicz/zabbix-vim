@@ -8,43 +8,83 @@
 <body>
   <header>
     <h1>Zabbix Vim Keys</h1>
-    <p class="hint">Auto dashboards</p>
+    <p class="hint">Dashboard generator</p>
   </header>
 
-  <form id="form">
+  <form id="credentials" autocomplete="off">
     <label>
       Zabbix URL
-      <input id="url" type="url" placeholder="https://zabbix.example" autocomplete="off" spellcheck="false">
+      <input id="url" type="url" placeholder="https://zabbix.example" spellcheck="false">
     </label>
 
     <label>
       API token
-      <input id="token" type="password" placeholder="preferred: token with dashboard write access" autocomplete="off">
+      <input id="token" type="password" placeholder="preferred: token with dashboard write access">
     </label>
 
     <div class="split">
       <label>
         User <span class="muted">(when no token)</span>
-        <input id="user" type="text" placeholder="Admin" autocomplete="off" spellcheck="false">
+        <input id="user" type="text" placeholder="Admin" spellcheck="false">
       </label>
       <label>
         Password
-        <input id="password" type="password" autocomplete="off">
+        <input id="password" type="password">
+      </label>
+    </div>
+  </form>
+
+  <nav class="tabs">
+    <button type="button" id="tab-auto" class="tab is-active">Auto (per group)</button>
+    <button type="button" id="tab-custom" class="tab">Custom</button>
+  </nav>
+
+  <section id="panel-auto">
+    <label>
+      Host groups <span class="muted">(comma separated, empty = all)</span>
+      <input id="groups" type="text" placeholder="Linux servers, Databases" spellcheck="false">
+    </label>
+    <button id="generate" type="button">Generate auto dashboards</button>
+  </section>
+
+  <section id="panel-custom" hidden>
+    <label>
+      Dashboard name
+      <input id="custom-name" type="text" placeholder="Ops overview" spellcheck="false">
+    </label>
+
+    <label>
+      Host groups <span class="muted">(select one or more)</span>
+      <select id="custom-groups" multiple size="5"></select>
+    </label>
+    <button id="load-groups" type="button" class="secondary">Load groups from Zabbix</button>
+
+    <fieldset>
+      <legend>Widgets</legend>
+      <label class="row"><input id="w-problems" type="checkbox" checked> Problems</label>
+      <label class="row"><input id="w-severity" type="checkbox" checked> Problems by severity</label>
+      <label class="row"><input id="w-availability" type="checkbox" checked> Host availability</label>
+      <label class="row"><input id="w-graphs" type="checkbox" checked> Graphs</label>
+    </fieldset>
+
+    <div class="split">
+      <label>
+        Graphs per host
+        <input id="graphs-per-host" type="number" min="0" max="5" value="2">
+      </label>
+      <label>
+        Max graphs
+        <input id="max-graphs" type="number" min="0" max="24" value="8">
       </label>
     </div>
 
-    <label>
-      Host groups <span class="muted">(comma separated, empty = all)</span>
-      <input id="groups" type="text" placeholder="Linux servers, Databases" autocomplete="off">
-    </label>
+    <button id="custom-generate" type="button">Generate custom dashboard</button>
+  </section>
 
-    <label class="row">
-      <input id="apply" type="checkbox">
-      Apply changes <span class="muted">(unchecked = dry run)</span>
-    </label>
-
-    <button id="generate" type="button">Generate dashboards</button>
-  </form>
+  <label class="row apply">
+    <input id="apply" type="checkbox">
+    Apply changes <span class="muted">(unchecked = dry run)</span>
+  </label>
 
   <pre id="status" class="status" aria-live="polite"></pre>
 

@@ -1,4 +1,4 @@
-import { buildDashboard } from './dashboards.js';
+import { buildCustomDashboard, buildDashboard } from './dashboards.js';
 
 export async function collectGroups(client, wanted = []) {
   const groups = await client.call('hostgroup.get', {
@@ -18,13 +18,36 @@ export async function collectGroups(client, wanted = []) {
   return selected;
 }
 
-async function collectGraphs(client, host) {
-  const graphs = await client.call('graph.get', {
-    output: ['graphid', 'name'],
-    hostids: [host.hostid],
-    sortfield: 'name',
-  });
-  return { hostid: host.hostid, hostName: host.name, graphs };
+async function loadHostGraphs(client, hosts) {
+  const graphs = [];
+  for (const host of hosts) {
+    const hostGraphs = await client.call('graph.get', {
+      output: ['graphid', 'name'],
+      hostids: [host.hostid],
+      sortfield: 'name',
+    });
+    graphs.push({ hostid: host.hostid, hostName: host.name, graphs: hostGraphs });
+  }
+  return graphs;
+}
+
+async function upsertDashboard(client, dashboard, apply) {
+  if (!apply) return { action: 'would create', payload: dashboard };
+
+  const existing = (
+    await client.call('dashboard.get', {
+      output: ['dashboardid'],
+      filter: { name: dashboard.name },
+    })
+  )[0];
+
+  if (existing) {
+    await client.call('dashboard.update', { dashboardid: existing.dashboardid, ...dashboard });
+    return { action: 'updated', dashboardid: existing.dashboardid };
+  }
+
+  const created = await client.call('dashboard.create', dashboard);
+  return { action: 'created', dashboardid: created.dashboardids[0] };
 }
 
 export async function provisionDashboards(client, options = {}) {
@@ -47,6 +70,7 @@ export async function provisionDashboards(client, options = {}) {
       groupids: [group.groupid],
       sortfield: 'name',
     });
+
     if (hosts.length === 0 && skipEmpty) {
       const skipped = { group: group.name, name: '', hostCount: 0, widgetCount: 0, action: 'skipped' };
       onProgress(skipped);
@@ -54,41 +78,57 @@ export async function provisionDashboards(client, options = {}) {
       continue;
     }
 
-    const graphs = [];
-    for (const host of hosts) graphs.push(await collectGraphs(client, host));
-
+    const graphs = await loadHostGraphs(client, hosts);
     const dashboard = buildDashboard({ group, graphs, nameTemplate, options: { perHost, maxTotal } });
-    const existing = (
-      await client.call('dashboard.get', {
-        output: ['dashboardid'],
-        filter: { name: dashboard.name },
-      })
-    )[0];
+    const result = await upsertDashboard(client, dashboard, apply);
 
-    const base = {
+    const entry = {
       group: group.name,
       name: dashboard.name,
       hostCount: hosts.length,
       widgetCount: dashboard.pages[0].widgets.length,
+      ...result,
     };
-
-    if (!apply) {
-      onProgress({ ...base, action: 'would create' });
-      report.push({ ...base, action: 'would create', payload: dashboard });
-      continue;
-    }
-
-    if (existing) {
-      await client.call('dashboard.update', { dashboardid: existing.dashboardid, ...dashboard });
-      onProgress({ ...base, action: 'updated' });
-      report.push({ ...base, action: 'updated', dashboardid: existing.dashboardid });
-    } else {
-      const created = await client.call('dashboard.create', dashboard);
-      const dashboardid = created.dashboardids[0];
-      onProgress({ ...base, action: 'created' });
-      report.push({ ...base, action: 'created', dashboardid });
-    }
+    onProgress(entry);
+    report.push(entry);
   }
 
   return report;
+}
+
+export async function provisionCustomDashboard(client, options = {}) {
+  const {
+    name,
+    groupids = [],
+    widgets = {},
+    perHost = 2,
+    maxTotal = 8,
+    apply = false,
+    onProgress = () => {},
+  } = options;
+
+  const hosts = await client.call('host.get', {
+    output: ['hostid', 'name'],
+    groupids,
+    sortfield: 'name',
+  });
+  const graphs = await loadHostGraphs(client, hosts);
+  const dashboard = buildCustomDashboard({
+    name,
+    groupids,
+    graphs,
+    widgets,
+    options: { perHost, maxTotal },
+  });
+  const result = await upsertDashboard(client, dashboard, apply);
+
+  const entry = {
+    group: '(custom)',
+    name,
+    hostCount: hosts.length,
+    widgetCount: dashboard.pages[0].widgets.length,
+    ...result,
+  };
+  onProgress(entry);
+  return [entry];
 }
