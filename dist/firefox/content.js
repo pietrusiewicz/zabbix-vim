@@ -671,6 +671,16 @@ function boot() {
     if (typeof input.select === 'function') input.select();
   }
 
+  // Some navigation anchors have no text at all (icon-only menu toggles), so
+  // the extracted label can be a raw URL. Fall back to the action name.
+  function commandLabel(anchor, target) {
+    const raw = (anchor.label || '').trim();
+    const looksLikeUrl =
+      raw === '' || /^(?:https?:\/\/|\/|zabbix\.php)/i.test(raw) || /\.php(?:[?#]|$)/i.test(raw);
+    if (looksLikeUrl && target) return target.name;
+    return raw || anchor.href;
+  }
+
   function buildCommands() {
     const commands = [];
     const seen = new Set();
@@ -683,7 +693,7 @@ function boot() {
       if (seen.has(key)) continue;
       seen.add(key);
       commands.push({
-        name: anchor.label,
+        name: commandLabel(anchor, target),
         description: target ? target.name : anchor.href,
         run: () => win.location.assign(anchor.href),
       });
