@@ -4,6 +4,18 @@ Vim-style keyboard navigation and hint mode for the Zabbix web frontend. Manifes
 
 The extension is a content script only: it injects a keyboard layer on top of the page, renders its UI in a shadow root, and never talks to the network or stores credentials.
 
+## Screenshots
+
+Real Zabbix 7.0.32 instance, extension loaded unpacked:
+
+| Normal | Hint mode (`f`) |
+| --- | --- |
+| ![Hosts page](docs/screenshots/01-hosts.png) | ![Hint labels](docs/screenshots/02-hints.png) |
+
+| Command palette (`:`) | Hint mode on the problem list |
+| --- | --- |
+| ![Command palette](docs/screenshots/03-palette.png) | ![Hints on problems](docs/screenshots/04-problems-hints.png) |
+
 ## Quick start (no build)
 
 Prebuilt bundles are committed under `dist/`, so you can load the extension straight from a download.
@@ -69,7 +81,7 @@ npm test        # node:test unit tests
 npm run check   # syntax-check the built bundles
 ```
 
-No dependencies, no bundler: `scripts/build.mjs` inlines the ESM module graph into a single IIFE, because content scripts cannot be ES modules. The script also rejects duplicate top-level declarations, which would otherwise collide silently in the shared scope. After rebuilding, click the reload icon on the extension card and refresh the Zabbix tab.
+No build dependencies: `scripts/build.mjs` inlines the ESM module graph into a single IIFE, because content scripts cannot be ES modules. The script also rejects duplicate top-level declarations, which would otherwise collide silently in the shared scope. After rebuilding, click the reload icon on the extension card and refresh the Zabbix tab.
 
 ### Layout
 
@@ -81,15 +93,40 @@ src/
   ui/                 hint overlay, palette, HUD, shadow root
   manifest.*.json     per-browser manifests
 dist/                 committed builds loaded as unpacked extensions
-scripts/build.mjs     inlines modules, writes dist/
-tests/                unit tests for the pure modules
+docs/screenshots/     screenshots captured against a real instance
+scripts/              build and screenshot helpers
+tests/                unit tests (node:test)
+tests/e2e/            end-to-end tests against a live Zabbix
 ```
 
 Zabbix-specific code lives only in `src/zabbix/` and in the command definitions in `src/content/main.js`; everything else is generic.
 
+## Testing
+
+Unit tests cover the pure logic and need nothing but Node.js:
+
+```bash
+npm test
+```
+
+The end-to-end suite loads `dist/chromium` into Chromium through Playwright and drives a live Zabbix instance. Install the browser once and point the suite at your frontend:
+
+```bash
+npx playwright install chromium
+ZBX_URL=http://127.0.0.1:8080 npm run test:e2e
+```
+
+`ZBX_USER` and `ZBX_PASSWORD` default to `Admin` / `zabbix`. The suite skips itself when `ZBX_URL` is unset, so `npm test` stays hermetic. It covers: content-script injection, staying inert on non-Zabbix pages, hint mode, hint activation, palette open/filter/close, and the insert-mode switch on form focus.
+
+Regenerate the README screenshots from a running instance with:
+
+```bash
+ZBX_URL=http://127.0.0.1:8080 npm run screenshots
+```
+
 ## Status
 
-Early scaffold. Core logic is unit-tested and the extension has been exercised end-to-end in headless Chromium against a local DOM mock of the Zabbix frontend. It has **not** been validated against a real Zabbix instance yet, so selectors may need tuning for your version and theme.
+Validated end-to-end against **Zabbix 7.0.32** (frontend in Podman, Chromium 141, Playwright). Unit tests cover the pure logic; the end-to-end suite exercises the real DOM.
 
 Scope is deliberately read-only: navigation, scrolling, hints, and a command palette. No API calls, no mutations (acknowledge, maintenance, disable).
 
@@ -99,4 +136,4 @@ Scope is deliberately read-only: navigation, scrolling, hints, and a command pal
 - Hints are collected when hint mode starts; live re-scanning while the DOM changes (dashboards, AJAX filters) is not implemented.
 - Graphs and SVG dashboard widgets are not keyboard-navigable.
 - The palette lists navigation targets, not arbitrary Zabbix actions.
-- Selectors have only been tested against a local mock, not a production instance.
+- Only Zabbix 7.0 has been tested; older frontends use different DOM and may need selector tweaks.
