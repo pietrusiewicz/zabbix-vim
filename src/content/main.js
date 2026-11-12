@@ -1,6 +1,6 @@
 import { Mode, createModeState, isEditableElement } from '../core/modes.js';
 import { createKeymap } from '../core/keymap.js';
-import { findActionTarget } from '../core/pages.js';
+import { findActionTarget, parseTarget } from '../core/pages.js';
 import { detectZabbix } from '../zabbix/detect.js';
 import {
   collectHintTargets,
@@ -102,11 +102,16 @@ function boot() {
     const commands = [];
     const seen = new Set();
     for (const anchor of collectNavigationAnchors(doc)) {
-      if (!anchor.label || seen.has(anchor.href)) continue;
-      seen.add(anchor.href);
+      if (!anchor.label) continue;
+      const target = parseTarget(anchor.href);
+      // Deduplicate by action name: list pages link to hundreds of hosts, but
+      // the palette only needs one entry per view.
+      const key = target ? `${target.kind}:${target.name}` : anchor.href;
+      if (seen.has(key)) continue;
+      seen.add(key);
       commands.push({
         name: anchor.label,
-        description: anchor.href,
+        description: target ? target.name : anchor.href,
         run: () => win.location.assign(anchor.href),
       });
     }
