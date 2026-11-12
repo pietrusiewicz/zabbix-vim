@@ -16,9 +16,11 @@ Real Zabbix 7.0.32 instance, extension loaded unpacked:
 | --- | --- |
 | ![Command palette](docs/screenshots/03-palette.png) | ![Hints on problems](docs/screenshots/04-problems-hints.png) |
 
-An automatically provisioned dashboard (problems, severity, host availability, CPU graphs):
+An automatically provisioned dashboard (problems, severity, host availability, CPU graphs), and the popup that generates it:
 
 ![Auto dashboard](docs/screenshots/05-auto-dashboard.png)
+
+![Dashboard popup](docs/screenshots/06-popup.png)
 
 ## Quick start (no build)
 
@@ -92,7 +94,9 @@ No build dependencies: `scripts/build.mjs` inlines the ESM module graph into a s
 ```
 src/
   content/main.js     wiring: modes, key bindings, commands
-  core/               pure logic (keymap, labels, modes, page parsing)
+  popup/              toolbar popup: dashboard generator UI
+  api/                Zabbix JSON-RPC client (token or session)
+  core/               pure logic (keymap, labels, modes, page parsing, dashboard builder, provisioner)
   zabbix/             Zabbix-specific detection and DOM selectors
   ui/                 hint overlay, palette, HUD, shadow root
   manifest.*.json     per-browser manifests
@@ -101,7 +105,6 @@ docs/screenshots/     screenshots captured against a real instance
 scripts/              build and screenshot helpers
 tests/                unit tests (node:test)
 tests/e2e/            end-to-end tests against a live Zabbix
-scripts/lib/          pure dashboard building blocks (tested)
 scripts/provision-dashboards.mjs   dashboard provisioner (CLI)
 ```
 
@@ -122,7 +125,7 @@ npx playwright install chromium
 ZBX_URL=http://127.0.0.1:8080 npm run test:e2e
 ```
 
-`ZBX_USER` and `ZBX_PASSWORD` default to `Admin` / `zabbix`. The suite skips itself when `ZBX_URL` is unset, so `npm test` stays hermetic. It covers: content-script injection, staying inert on non-Zabbix pages, hint mode, hint activation, palette open/filter/close, and the insert-mode switch on form focus.
+`ZBX_USER` and `ZBX_PASSWORD` default to `Admin` / `zabbix`. The suite skips itself when `ZBX_URL` is unset, so `npm test` stays hermetic. It covers: content-script injection, staying inert on non-Zabbix pages, hint mode, hint activation, palette open/filter/close, the insert-mode switch on form focus, and the popup's dry-run dashboard generation. The popup test never writes to the Zabbix configuration.
 
 Regenerate the README screenshots from a running instance with:
 
@@ -134,7 +137,9 @@ ZBX_URL=http://127.0.0.1:8080 npm run screenshots
 
 `scripts/provision-dashboards.mjs` creates one real Zabbix dashboard per host group, so it shows up in the frontend for every user and in kiosk mode. Each dashboard gets a full-width Problems widget, Problems by severity, Host availability, and up to two graphs per host (CPU and memory graphs are preferred, taken round-robin so one noisy host cannot fill the page).
 
-It is idempotent: a dashboard is matched by name and updated in place, so you can re-run it on a schedule. The default is a dry run that prints the API payload.
+It is idempotent: a dashboard is matched by name and updated in place, so you can re-run it on a schedule. Groups without hosts are skipped; pass `--include-empty` if you want an empty dashboard for them.
+
+There are two ways to run it: from the extension popup (toolbar icon → *Generate dashboards*) or from the command line. The popup stores the URL, token, user and group filter locally, and has an *Apply changes* checkbox; unchecked means dry run. Only the URL, token, user name and group filter are stored — never the password.
 
 ```bash
 # preview what would be created for one group
