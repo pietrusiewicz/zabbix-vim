@@ -16,6 +16,10 @@ Real Zabbix 7.0.32 instance, extension loaded unpacked:
 | --- | --- |
 | ![Command palette](docs/screenshots/03-palette.png) | ![Hints on problems](docs/screenshots/04-problems-hints.png) |
 
+An automatically provisioned dashboard (problems, severity, host availability, CPU graphs):
+
+![Auto dashboard](docs/screenshots/05-auto-dashboard.png)
+
 ## Quick start (no build)
 
 Prebuilt bundles are committed under `dist/`, so you can load the extension straight from a download.
@@ -97,6 +101,8 @@ docs/screenshots/     screenshots captured against a real instance
 scripts/              build and screenshot helpers
 tests/                unit tests (node:test)
 tests/e2e/            end-to-end tests against a live Zabbix
+scripts/lib/          pure dashboard building blocks (tested)
+scripts/provision-dashboards.mjs   dashboard provisioner (CLI)
 ```
 
 Zabbix-specific code lives only in `src/zabbix/` and in the command definitions in `src/content/main.js`; everything else is generic.
@@ -124,9 +130,37 @@ Regenerate the README screenshots from a running instance with:
 ZBX_URL=http://127.0.0.1:8080 npm run screenshots
 ```
 
+## Automatic dashboards
+
+`scripts/provision-dashboards.mjs` creates one real Zabbix dashboard per host group, so it shows up in the frontend for every user and in kiosk mode. Each dashboard gets a full-width Problems widget, Problems by severity, Host availability, and up to two graphs per host (CPU and memory graphs are preferred, taken round-robin so one noisy host cannot fill the page).
+
+It is idempotent: a dashboard is matched by name and updated in place, so you can re-run it on a schedule. The default is a dry run that prints the API payload.
+
+```bash
+# preview what would be created for one group
+ZBX_URL=http://127.0.0.1:8080 ZBX_PASSWORD=zabbix \
+  npm run dashboards -- --group "Linux servers"
+
+# write changes for every group
+ZBX_URL=http://127.0.0.1:8080 ZBX_TOKEN=<api-token> \
+  npm run dashboards -- --apply
+
+# custom layout limits and name
+ZBX_URL=http://127.0.0.1:8080 ZBX_TOKEN=<api-token> \
+  npm run dashboards -- --apply --graphs-per-host 3 --max-graphs 12 --name "Ops: {group}"
+```
+
+Options: `--url`, `--token`, `--user` / `--password` (session login fallback), `--group` (repeatable, accepts name or id), `--name`, `--graphs-per-host`, `--max-graphs`, `--apply`.
+
+The token needs permission to create and update dashboards. Cron example:
+
+```cron
+*/30 * * * * cd /path/to/zabbix-vim && ZBX_URL=https://zabbix.example ZBX_TOKEN=... node scripts/provision-dashboards.mjs --apply >/dev/null 2>&1
+```
+
 ## Status
 
-Validated end-to-end against **Zabbix 7.0.32** (frontend in Podman, Chromium 141, Playwright). Unit tests cover the pure logic; the end-to-end suite exercises the real DOM.
+Validated end-to-end against **Zabbix 7.0.32** (frontend in Podman, Chromium 141, Playwright). Unit tests cover the pure logic and the dashboard payload builder; the end-to-end suite exercises the real DOM, and the provisioner was run against the live instance.
 
 Scope is deliberately read-only: navigation, scrolling, hints, and a command palette. No API calls, no mutations (acknowledge, maintenance, disable).
 
