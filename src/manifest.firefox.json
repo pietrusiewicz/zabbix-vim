@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Zabbix Vim Keys",
+  "version": "0.1.0",
+  "description": "Vim-style keyboard navigation and hint mode for the Zabbix frontend.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "zabbix-vim@local",
+      "strict_min_version": "115.0"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "zabbix-vim",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Vim-style keyboard navigation and hint mode for the Zabbix frontend.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/*.test.js",
+    "check": "node --check dist/chromium/content.js && node --check dist/firefox/content.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
