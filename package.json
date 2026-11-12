@@ -7,9 +7,15 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "node --test tests/*.test.js",
-    "check": "node --check dist/chromium/content.js && node --check dist/firefox/content.js"
+    "check": "node --check dist/chromium/content.js && node --check dist/firefox/content.js",
+    "test:e2e": "node --test tests/e2e/*.test.mjs",
+    "test:all": "npm test && npm run test:e2e",
+    "screenshots": "node scripts/screenshots.mjs"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.0"
   }
 }
