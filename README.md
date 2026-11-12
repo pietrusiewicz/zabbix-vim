@@ -22,6 +22,10 @@ An automatically provisioned dashboard (problems, severity, host availability, C
 
 ![Dashboard popup](docs/screenshots/06-popup.png)
 
+The custom builder: pick the name, host groups, which widgets to include and how many graphs:
+
+![Custom dashboard builder](docs/screenshots/07-custom-popup.png)
+
 ## Quick start (no build)
 
 Prebuilt bundles are committed under `dist/`, so you can load the extension straight from a download.
@@ -106,6 +110,9 @@ scripts/              build and screenshot helpers
 tests/                unit tests (node:test)
 tests/e2e/            end-to-end tests against a live Zabbix
 scripts/provision-dashboards.mjs   dashboard provisioner (CLI)
+src/core/dashboards.js   widget layout and dashboard payload builders
+src/core/provision.js    create-or-update orchestration shared by popup and CLI
+src/api/zabbix.js        JSON-RPC client (Bearer token or session login)
 ```
 
 Zabbix-specific code lives only in `src/zabbix/` and in the command definitions in `src/content/main.js`; everything else is generic.
@@ -140,6 +147,11 @@ ZBX_URL=http://127.0.0.1:8080 npm run screenshots
 It is idempotent: a dashboard is matched by name and updated in place, so you can re-run it on a schedule. Groups without hosts are skipped; pass `--include-empty` if you want an empty dashboard for them.
 
 There are two ways to run it: from the extension popup (toolbar icon → *Generate dashboards*) or from the command line. The popup stores the URL, token, user and group filter locally, and has an *Apply changes* checkbox; unchecked means dry run. Only the URL, token, user name and group filter are stored — never the password.
+
+The popup has two tabs:
+
+- **Auto (per group)** — the fixed template described above, one dashboard per host group.
+- **Custom** — pick a dashboard name, one or more host groups (loaded from the API), which widgets to include (Problems, Problems by severity, Host availability, Graphs), and graph limits. Multi-group filters are encoded as repeated `groupids` widget fields, which is how Zabbix stores a multiselect; the dashboard is matched by name and updated in place like the automatic ones.
 
 ```bash
 # preview what would be created for one group
